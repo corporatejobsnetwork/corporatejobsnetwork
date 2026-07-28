@@ -4,18 +4,16 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDjXQSgyn5gTnSgePaXowhhkIGv8cWFG4s",
-  authDomain: "corporate-jobs-network-prod.firebaseapp.com",
-  projectId: "corporate-jobs-network-prod",
-  storageBucket: "corporate-jobs-network-prod.firebasestorage.app",
-  messagingSenderId: "211326481215",
-  appId: "1:211326481215:web:65ae79ef9efff52cc8d98a",
-  measurementId: "G-8JFTK5K3C6",
-}
+  apiKey: "AIzaSyDLtxrwevl56-68Q3Yiq-pSekEZKFpBH4c",
+  authDomain: "corporate-jobs-network.firebaseapp.com",
+  projectId: "corporate-jobs-network",
+  storageBucket: "corporate-jobs-network.firebasestorage.app",
+  messagingSenderId: "713078308931",
+  appId: "1:713078308931:web:c719dc08bd81be2ced94f6",
+  measurementId: "G-YRYDS5ZXK0",
+};
 
-const app = getApps().length
-  ? getApp()
-  : initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
