@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   BarChart3,
   BriefcaseBusiness,
+  Download,
   House,
   Landmark,
   LayoutDashboard,
@@ -48,6 +49,11 @@ const navigationItems = [
     name: "Manage Jobs",
     href: "/admin/panel/manage-jobs",
     icon: BriefcaseBusiness,
+  },
+  {
+    name: "Imported Jobs",
+    href: "/admin/panel/imported-jobs",
+    icon: Download,
   },
   {
     name: "Referral Requests",
