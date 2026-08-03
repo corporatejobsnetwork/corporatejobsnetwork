@@ -1,6 +1,7 @@
 import { fetchAshbyJobs } from "./ashby";
 import { fetchCustomJobs } from "./custom";
 import { fetchGreenhouseJobs } from "./greenhouse";
+import { fetchInfosysJobs } from "./infosys";
 import { fetchLeverJobs } from "./lever";
 import { fetchOracleJobs } from "./oracle";
 import { fetchSmartRecruitersJobs } from "./smartrecruiters";
@@ -69,10 +70,20 @@ export async function fetchJobsForCompany(
         company as OracleCompany
       );
 
-    case "custom":
+    case "custom": {
+      const customCompany =
+        company as CustomCompany;
+
+      if (customCompany.slug === "infosys") {
+        return fetchInfosysJobs(
+          customCompany
+        );
+      }
+
       return fetchCustomJobs(
-        company as CustomCompany
+        customCompany
       );
+    }
 
     default: {
       const unsupportedCompany: never = company;
@@ -103,7 +114,8 @@ export async function fetchJobsForCompanies(
 
   for (const company of companies) {
     try {
-      const jobs = await fetchJobsForCompany(company);
+      const jobs =
+        await fetchJobsForCompany(company);
 
       results.push({
         company,
@@ -129,6 +141,7 @@ export {
   fetchAshbyJobs,
   fetchCustomJobs,
   fetchGreenhouseJobs,
+  fetchInfosysJobs,
   fetchLeverJobs,
   fetchOracleJobs,
   fetchSmartRecruitersJobs,

@@ -1,4 +1,11 @@
-import { determineJobCategory } from "../filters";
+import {
+  determineJobCategory,
+  shouldImportJob,
+} from "../filters";
+import {
+  cleanImportedJobContent,
+  looksLikeNonJobPage,
+} from "@/lib/job-content-cleaner";
 import type {
   CustomCompany,
   NormalizedImportedJob,
@@ -470,32 +477,119 @@ function getWorkMode(
   return "Not Mentioned";
 }
 
-function looksLikeJobUrl(url: string): boolean {
+const BLOCKED_LINK_TEXT_PATTERNS: RegExp[] = [
+  /^careers?$/i,
+  /^jobs?$/i,
+  /^search(?: jobs?)?$/i,
+  /^explore(?: opportunities| openings)?$/i,
+  /^explore opportunities by location$/i,
+  /^graduates?$/i,
+  /^experienced professionals?$/i,
+  /^internships?$/i,
+  /^our culture$/i,
+  /^hear from our employees$/i,
+  /^employee stories$/i,
+  /^recruitment fraud(?: alert)?$/i,
+  /^about us$/i,
+  /^apply(?: now)?$/i,
+  /^join us$/i,
+  /^learn more$/i,
+  /^view all$/i,
+];
+
+const JOB_LINK_TEXT_SIGNALS = [
+  "engineer",
+  "developer",
+  "analyst",
+  "consultant",
+  "architect",
+  "manager",
+  "specialist",
+  "associate",
+  "executive",
+  "lead",
+  "director",
+  "intern",
+  "trainee",
+  "designer",
+  "scientist",
+  "administrator",
+  "coordinator",
+  "officer",
+  "recruiter",
+];
+
+function normalizeAnchorText(value: string): string {
+  return stripHtml(value)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasJobIdentifier(url: URL): boolean {
+  const value = `${url.pathname}${url.search}`.toLowerCase();
+
+  return (
+    /(?:^|[?&])(?:jobid|job_id|job|requisitionid|requisition_id|reqid|req_id|positionid|position_id)=?[^&]+/.test(
+      value
+    ) ||
+    /\/(?:job|jobs|position|positions|requisition|requisitions|vacancy|vacancies|opening|openings)\/[a-z0-9][a-z0-9._-]{2,}/i.test(
+      url.pathname
+    ) ||
+    /\/[a-z0-9-]*(?:job|position|requisition|vacancy|opening)[-_][a-z0-9._-]+/i.test(
+      url.pathname
+    )
+  );
+}
+
+function isBlockedJobUrl(url: URL): boolean {
+  const value = `${url.pathname}${url.search}`.toLowerCase();
+
+  return (
+    /privacy|terms|cookie|login|register|profile|talent-community|fraud|culture|about-us|employee-stories|graduates?|internships?$/.test(
+      value
+    ) ||
+    /\/(?:search|job-search|jobs-search)(?:\/|$)/.test(value) ||
+    /\/(?:jobs?|careers?)(?:\/)?$/.test(value)
+  );
+}
+
+function looksLikeJobUrl(
+  url: string,
+  anchorText = ""
+): boolean {
   try {
     const parsed = new URL(url);
-    const value = `${parsed.pathname}${parsed.search}`.toLowerCase();
+    const normalizedText = normalizeAnchorText(anchorText);
 
-    const positive =
-      /\/job\//.test(value) ||
-      /\/jobs\//.test(value) ||
-      /\/career\//.test(value) ||
-      /\/careers\//.test(value) ||
-      /jobid=/.test(value) ||
-      /job_id=/.test(value) ||
-      /requisition/.test(value) ||
-      /position/.test(value) ||
-      /vacancy/.test(value) ||
-      /opening/.test(value);
+    if (isBlockedJobUrl(parsed)) {
+      return false;
+    }
 
-    const negative =
-      /\/search(?:\/|$)/.test(value) ||
-      /\/jobs?(?:\/)?$/.test(value) ||
-      /\/careers?(?:\/)?$/.test(value) ||
-      /privacy|terms|cookie|login|register|profile|talent-community/.test(
-        value
+    if (
+      normalizedText &&
+      BLOCKED_LINK_TEXT_PATTERNS.some((pattern) =>
+        pattern.test(normalizedText)
+      )
+    ) {
+      return false;
+    }
+
+    if (hasJobIdentifier(parsed)) {
+      return true;
+    }
+
+    const textValue = normalizedText.toLowerCase();
+    const hasRoleSignal = JOB_LINK_TEXT_SIGNALS.some((signal) =>
+      textValue.includes(signal)
+    );
+
+    const pathValue = parsed.pathname.toLowerCase();
+    const hasJobPath =
+      /\/(?:job|jobs|position|positions|requisition|requisitions|vacancy|vacancies|opening|openings)\//.test(
+        pathValue
       );
 
-    return positive && !negative;
+    return hasJobPath && hasRoleSignal;
   } catch {
     return false;
   }
@@ -507,22 +601,24 @@ function extractJobLinks(
 ): string[] {
   const links = new Set<string>();
   const anchorPattern =
-    /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>/gi;
+    /<a\b([^>]*)href=["']([^"'#]+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
 
   for (const match of html.matchAll(anchorPattern)) {
-    const href = decodeHtmlEntities(match[1]).trim();
+    const href = decodeHtmlEntities(match[2]).trim();
+    const anchorText = normalizeAnchorText(match[4] || "");
 
     if (
       !href ||
       href.startsWith("javascript:") ||
-      href.startsWith("mailto:")
+      href.startsWith("mailto:") ||
+      href.startsWith("tel:")
     ) {
       continue;
     }
 
     const url = absoluteUrl(baseUrl, href);
 
-    if (url && looksLikeJobUrl(url)) {
+    if (url && looksLikeJobUrl(url, anchorText)) {
       links.add(url);
     }
   }
@@ -561,7 +657,7 @@ async function fetchHtml(
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-US,en;q=0.9",
       "User-Agent":
-        "Mozilla/5.0 (compatible; CorporateJobsNetwork/1.0)",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36",
     },
     cache: "no-store",
     redirect: "follow",
@@ -573,7 +669,26 @@ async function fetchHtml(
     );
   }
 
-  return response.text();
+ const html = await response.text();
+
+if (companyName === "Infosys") {
+  console.log("======================================");
+  console.log("INFOSYS FETCH DEBUG");
+  console.log("======================================");
+  console.log("URL:", url);
+  console.log("Final URL:", response.url);
+  console.log("Status:", response.status);
+  console.log(
+    "Content-Type:",
+    response.headers.get("content-type")
+  );
+  console.log("HTML Length:", html.length);
+  console.log("First 1000 characters:");
+  console.log(html.substring(0, 1000));
+  console.log("======================================");
+}
+
+return html;
 }
 
 async function collectJobSources(
@@ -705,16 +820,44 @@ async function parseJob(
     extractTitle(html) ||
     "Role Not Mentioned";
 
-  const description =
+  const rawDescription =
     stripHtml(job?.description || "") ||
     extractMetaContent(html, "description") ||
     fallbackText;
 
-  const responsibilities =
+  const rawResponsibilities =
     stripHtml(job?.responsibilities || "");
 
-  const eligibility =
+  const rawEligibility =
     stripHtml(job?.qualifications || "");
+
+  const cleanedContent = cleanImportedJobContent(
+    [
+      rawDescription,
+      rawResponsibilities,
+      rawEligibility,
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+  );
+
+  const description =
+    cleanedContent.description ||
+    rawDescription;
+
+  const responsibilities =
+    cleanedContent.responsibilities ||
+    rawResponsibilities;
+
+  const eligibility =
+    cleanedContent.eligibility ||
+    rawEligibility;
+
+  const benefits =
+    cleanedContent.benefits || "";
+
+  const selectionProcess =
+    cleanedContent.selectionProcess || "";
 
   const location =
     stringifyUnknown(
@@ -748,9 +891,22 @@ async function parseJob(
     description,
     responsibilities,
     eligibility,
+    benefits,
+    selectionProcess,
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  if (
+    looksLikeNonJobPage(
+      role,
+      completeText
+    )
+  ) {
+    throw new Error(
+      `Rejected non-job page: ${role}`
+    );
+  }
 
   const skills = Array.from(
     new Set([
@@ -794,8 +950,8 @@ async function parseJob(
     description,
     responsibilities,
     eligibility,
-    benefits: "",
-    selectionProcess: "",
+    benefits,
+    selectionProcess,
 
     experience:
       stringifyUnknown(
@@ -812,7 +968,7 @@ async function parseJob(
         job?.educationRequirements
       ) ||
       extractByPattern(
-        completeText,
+        `${eligibility}\n${completeText}`,
         EDUCATION_PATTERNS,
         "Not Mentioned"
       ),
@@ -880,6 +1036,10 @@ export async function fetchCustomJobs(
         !job.sourceJobId ||
         seen.has(job.uniqueKey)
       ) {
+        continue;
+      }
+
+      if (!shouldImportJob(job)) {
         continue;
       }
 

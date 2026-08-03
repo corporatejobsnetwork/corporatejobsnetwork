@@ -57,6 +57,11 @@ const COMPANY_LOGOS: Record<string, string> = {
     "https://upload.wikimedia.org/wikipedia/commons/7/75/Zomato_logo.png",
 };
 
+const BROKEN_LEGACY_LOGO_PREFIXES = [
+  "/logos/",
+  "logos/",
+];
+
 function normalizeCompanyName(company = ""): string {
   return company
     .toLowerCase()
@@ -74,33 +79,70 @@ function normalizeCompanyName(company = ""): string {
     .trim();
 }
 
+function isUsableExistingLogo(value?: string): boolean {
+  const logo = value?.trim();
+
+  if (!logo) {
+    return false;
+  }
+
+  const normalizedLogo = logo.toLowerCase();
+
+  if (
+    BROKEN_LEGACY_LOGO_PREFIXES.some((prefix) =>
+      normalizedLogo.startsWith(prefix)
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    normalizedLogo.startsWith("https://") ||
+    normalizedLogo.startsWith("http://") ||
+    normalizedLogo.startsWith("data:image/") ||
+    normalizedLogo.startsWith("/")
+  );
+}
+
 export function getCompanyLogo(
   company?: string,
   existingLogo?: string
 ): string {
-  const savedLogo = existingLogo?.trim();
+  const normalizedCompany =
+    normalizeCompanyName(company);
 
-  if (savedLogo) {
-    return savedLogo;
+  if (normalizedCompany) {
+    const exactLogo =
+      COMPANY_LOGOS[normalizedCompany];
+
+    if (exactLogo) {
+      return exactLogo;
+    }
+
+    const matchedCompany = Object.keys(
+      COMPANY_LOGOS
+    ).find(
+      (companyName) =>
+        normalizedCompany.includes(
+          companyName
+        ) ||
+        companyName.includes(
+          normalizedCompany
+        )
+    );
+
+    if (matchedCompany) {
+      return COMPANY_LOGOS[
+        matchedCompany
+      ];
+    }
   }
 
-  const normalizedCompany = normalizeCompanyName(company);
-
-  if (!normalizedCompany) {
-    return "";
+  if (
+    isUsableExistingLogo(existingLogo)
+  ) {
+    return existingLogo!.trim();
   }
 
-  const exactLogo = COMPANY_LOGOS[normalizedCompany];
-
-  if (exactLogo) {
-    return exactLogo;
-  }
-
-  const matchedCompany = Object.keys(COMPANY_LOGOS).find(
-    (companyName) =>
-      normalizedCompany.includes(companyName) ||
-      companyName.includes(normalizedCompany)
-  );
-
-  return matchedCompany ? COMPANY_LOGOS[matchedCompany] : "";
+  return "";
 }

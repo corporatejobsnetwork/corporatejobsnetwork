@@ -9,10 +9,17 @@ interface GreenhouseJob {
   title: string;
   absolute_url: string;
   updated_at?: string;
+  first_published?: string;
+  application_deadline?: string | null;
   location?: {
     name?: string;
   };
   content?: string;
+  metadata?: Array<{
+    name?: string;
+    value?: unknown;
+    value_type?: string;
+  }>;
 }
 
 interface GreenhouseResponse {
@@ -37,6 +44,12 @@ const SECTION_HEADINGS = [
   "what you’ll do",
   "day to day",
   "day-to-day",
+  "what your day will look like",
+  "what you deliver",
+  "what you will deliver",
+  "key deliverables",
+  "your impact",
+  "what you will achieve",
   "requirements",
   "minimum requirements",
   "required qualifications",
@@ -54,6 +67,14 @@ const SECTION_HEADINGS = [
   "education",
   "skills",
   "technical skills",
+  "nice-to-have skills",
+  "nice to have skills",
+  "good to have skills",
+  "preferred experience",
+  "technical and professional requirements",
+  "educational qualification",
+  "educational qualifications",
+  "eligibility criteria",
   "benefits",
   "benefits and perks",
   "benefits & perks",
@@ -61,6 +82,12 @@ const SECTION_HEADINGS = [
   "what we offer",
   "why join us",
   "why razorpay",
+  "our offer",
+  "employee benefits",
+  "rewards and benefits",
+  "about the company",
+  "about company",
+  "about canonical",
   "selection process",
   "interview process",
 ];
@@ -79,6 +106,14 @@ const BOILERPLATE_START_PATTERNS = [
   /^accommodation/i,
   /^disclaimer/i,
   /^about razorpay/i,
+  /^about canonical/i,
+  /^about the company/i,
+  /^about company/i,
+  /^diversity/i,
+  /^inclusion/i,
+  /^#li[-_]/i,
+  /^#remote/i,
+  /^canonical is an equal opportunity employer/i,
 ];
 
 const EXPERIENCE_PATTERNS = [
@@ -91,10 +126,12 @@ const EXPERIENCE_PATTERNS = [
 ];
 
 const SALARY_PATTERNS = [
-  /₹\s?[\d,.]+\s*(?:-|–|—|to)\s*₹?\s?[\d,.]+\s*(?:per month|monthly|per annum|annually|lpa|lakhs?)/i,
-  /\b\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*LPA\b/i,
-  /\b₹\s?[\d,.]+\s*(?:per month|monthly|annually|per annum)\b/i,
-  /\b(?:salary|compensation|pay range)\s*[:\-]?\s*[^.\n]{3,100}/i,
+  /₹\s?[\d,.]+\s*(?:-|–|—|to)\s*₹?\s?[\d,.]+\s*(?:per month|monthly|per annum|annually|lpa|lakhs?|ctc)?/i,
+  /\bINR\s?[\d,.]+\s*(?:-|–|—|to)\s*(?:INR\s?)?[\d,.]+\s*(?:per month|monthly|per annum|annually|lpa|lakhs?|ctc)?\b/i,
+  /\b\d+(?:\.\d+)?\s*(?:-|–|—|to)\s*\d+(?:\.\d+)?\s*(?:LPA|lakhs?(?: per annum)?|CTC)\b/i,
+  /(?:\$|€|£)\s?[\d,.]+\s*(?:-|–|—|to)\s*(?:\$|€|£)?\s?[\d,.]+\s*(?:per year|annually|per annum|per month|monthly)?/i,
+  /\b(?:USD|EUR|GBP)\s?[\d,.]+\s*(?:-|–|—|to)\s*(?:USD|EUR|GBP)?\s?[\d,.]+\s*(?:per year|annually|per annum|per month|monthly)?\b/i,
+  /\b(?:salary range|pay range|compensation range)\s*[:\-]\s*(?=[^.\n]*(?:₹|INR|LPA|lakhs?|CTC|\$|USD|€|EUR|£|GBP))[^.\n]{3,140}/i,
 ];
 
 const SKILL_ALIASES: SkillAlias[] = [
@@ -667,10 +704,517 @@ function extractRequiredSkills(text: string): string[] {
   return requiredSkills.slice(0, 15);
 }
 
+
+
+function parseDate(value?: string | null): Date | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed;
+}
+
+function getGreenhouseJobDate(
+  job: GreenhouseJob
+): Date | null {
+  return (
+    parseDate(job.updated_at) ||
+    parseDate(job.first_published)
+  );
+}
+
+
+function isActiveGreenhouseJob(
+  job: GreenhouseJob
+): boolean {
+  if (!job.application_deadline) {
+    // The public Greenhouse Job Board API normally returns only open jobs.
+    return true;
+  }
+
+  const deadline = parseDate(
+    job.application_deadline
+  );
+
+  if (!deadline) {
+    return true;
+  }
+
+  deadline.setHours(23, 59, 59, 999);
+
+  return deadline.getTime() >= Date.now();
+}
+
+
+
+const INDIA_LOCATION_PATTERNS = [
+  /\bindia\b/i,
+  /\bbengaluru\b/i,
+  /\bbangalore\b/i,
+  /\bhyderabad\b/i,
+  /\bchennai\b/i,
+  /\bpune\b/i,
+  /\bmumbai\b/i,
+  /\bnoida\b/i,
+  /\bgurugram\b/i,
+  /\bgurgaon\b/i,
+  /\bnew delhi\b/i,
+  /\bdelhi\b/i,
+  /\bkolkata\b/i,
+  /\bkochi\b/i,
+  /\bcochin\b/i,
+  /\bahmedabad\b/i,
+  /\bjaipur\b/i,
+  /\bbhubaneswar\b/i,
+  /\bthiruvananthapuram\b/i,
+  /\btrivandrum\b/i,
+  /\bmangaluru\b/i,
+  /\bmangalore\b/i,
+  /\bhubballi\b/i,
+  /\bhubli\b/i,
+];
+
+function detectCountry(location: string): string {
+  if (INDIA_LOCATION_PATTERNS.some((pattern) => pattern.test(location))) {
+    return "India";
+  }
+
+  if (/\bemea\b/i.test(location)) {
+    return "EMEA";
+  }
+
+  if (/\bamericas?\b/i.test(location)) {
+    return "Americas";
+  }
+
+  if (/\beurope\b/i.test(location)) {
+    return "Europe";
+  }
+
+  if (/\bapac\b|\basia pacific\b/i.test(location)) {
+    return "APAC";
+  }
+
+  if (/\bunited states\b|\busa\b|\bu\.s\.\b/i.test(location)) {
+    return "United States";
+  }
+
+  if (/\bunited kingdom\b|\buk\b/i.test(location)) {
+    return "United Kingdom";
+  }
+
+  if (/\bcanada\b/i.test(location)) {
+    return "Canada";
+  }
+
+  if (/\baustralia\b/i.test(location)) {
+    return "Australia";
+  }
+
+  if (/\bsingapore\b/i.test(location)) {
+    return "Singapore";
+  }
+
+  return "Global";
+}
+
+function normalizeLocation(location: string): string {
+  const value = location.replace(/\s+/g, " ").trim();
+
+  const regions: string[] = [];
+
+  if (/\bemea\b/i.test(value)) regions.push("EMEA");
+  if (/\bamericas?\b/i.test(value)) regions.push("Americas");
+  if (/\bapac\b|\basia pacific\b/i.test(value)) regions.push("APAC");
+  if (INDIA_LOCATION_PATTERNS.some((pattern) => pattern.test(value))) {
+    regions.push("India");
+  }
+
+  const isRemote =
+    /\bremote\b|\bhome based\b|\bhome-based\b|\bwork from home\b|\bwfh\b/i.test(
+      value
+    );
+
+  if (isRemote && regions.length > 0) {
+    return `Remote (${Array.from(new Set(regions)).join(", ")})`;
+  }
+
+  if (isRemote) {
+    return "Remote";
+  }
+
+  return value || "Global";
+}
+
+function detectWorkMode(location: string, description: string): string {
+  const searchableText = `${location} ${description}`;
+
+  if (/\bhybrid\b/i.test(searchableText)) {
+    return "Hybrid";
+  }
+
+  if (
+    /\bremote\b|\bhome based\b|\bhome-based\b|\bwork from home\b|\bwfh\b/i.test(
+      searchableText
+    )
+  ) {
+    return "Remote";
+  }
+
+  return "On-site";
+}
+
+function extractEmploymentType(job: GreenhouseJob, description: string): string {
+  const metadataValue = job.metadata?.find((item) =>
+    /employment (?:length|type)|job type/i.test(item.name || "")
+  )?.value;
+
+  if (typeof metadataValue === "string" && metadataValue.trim()) {
+    return metadataValue.trim();
+  }
+
+  const searchableText = `${job.title} ${description}`;
+
+  if (/\bpart[- ]time\b/i.test(searchableText)) return "Part-time";
+  if (/\bcontract(?:or)?\b/i.test(searchableText)) return "Contract";
+  if (/\btemporary\b/i.test(searchableText)) return "Temporary";
+  if (/\bapprentice(?:ship)?\b/i.test(searchableText)) return "Apprenticeship";
+  if (/\bintern(?:ship)?\b/i.test(job.title)) return "Internship";
+
+  return "Full-time";
+}
+
+function determineGreenhouseCategory(
+  role: string,
+  description: string,
+  location: string,
+  experience: string
+): ReturnType<typeof determineJobCategory> {
+  const title = role.toLowerCase();
+  const combined = `${role} ${description} ${location} ${experience}`;
+
+  // Internship must be explicit. Do not classify ordinary roles merely
+  // because the description mentions graduates, learning or development.
+  if (
+    /\b(intern|internship|apprentice|apprenticeship|student trainee)\b/i.test(
+      title
+    ) ||
+    /\bthis is an internship\b|\binternship opportunity\b/i.test(combined)
+  ) {
+    return "internship";
+  }
+
+  if (
+    /\bwalk[- ]?in(?: drive)?\b/i.test(combined)
+  ) {
+    return "walk-in-drive";
+  }
+
+  if (
+    /\bwork from home\b|\bwfh\b/i.test(combined) ||
+    (/\bremote\b/i.test(location) && detectCountry(location) === "India")
+  ) {
+    return "work-from-home";
+  }
+
+  if (
+    /\bfreshers?\b|\bentry[- ]level\b|\brecent graduates?\b|\b0\s*(?:-|–|to)\s*[12]\s*years?\b/i.test(
+      combined
+    )
+  ) {
+    return "freshers";
+  }
+
+  if (
+    /\b0\s*(?:-|–|to)\s*[34]\s*years?\b/i.test(combined)
+  ) {
+    return "freshers-experienced";
+  }
+
+  return "experienced";
+}
+
+function extractJobDescription(text: string): string {
+  const stopHeadings = [
+    "responsibilities",
+    "roles and responsibilities",
+    "key responsibilities",
+    "what you will do",
+    "what you'll do",
+    "what you’ll do",
+    "what your day will look like",
+    "what you deliver",
+    "what you will deliver",
+    "key deliverables",
+    "your impact",
+    "requirements",
+    "qualifications",
+    "required qualifications",
+    "what we are looking for",
+    "what we're looking for",
+    "what we’re looking for",
+    "what we are looking for in you",
+    "eligibility",
+    "eligibility criteria",
+    "benefits",
+    "what we offer",
+    "what we offer colleagues",
+    "our offer",
+  ].map(normalizeHeading);
+
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const normalized = normalizeHeading(line);
+
+    if (
+      stopHeadings.some(
+        (heading) =>
+          normalized === heading ||
+          normalized.startsWith(`${heading}:`) ||
+          normalized.startsWith(`${heading} -`)
+      )
+    ) {
+      break;
+    }
+
+    if (!isBoilerplateStart(line)) {
+      result.push(line);
+    }
+  }
+
+  return result.join("\n").trim() || text;
+}
+
+function cleanExtractedSection(lines: string[]): string[] {
+  const unique = new Map<string, string>();
+
+  for (const line of lines) {
+    const cleaned = cleanSectionLine(line);
+
+    if (
+      !cleaned ||
+      isBoilerplateStart(cleaned) ||
+      /^#li[-_]/i.test(cleaned) ||
+      /^about (?:the )?company\b/i.test(cleaned) ||
+      /^about canonical\b/i.test(cleaned) ||
+      /equal opportunity employer/i.test(cleaned)
+    ) {
+      continue;
+    }
+
+    unique.set(cleaned.toLowerCase(), cleaned);
+  }
+
+  return Array.from(unique.values()).slice(0, 30);
+}
+
+function normalizeGreenhouseJob(
+  company: GreenhouseCompany,
+  job: GreenhouseJob
+): NormalizedImportedJob | null {
+  const sourceJobId = String(job.id || "").trim();
+  const role = job.title?.trim() || "";
+  const applyLink = job.absolute_url?.trim() || "";
+
+  if (!sourceJobId || !role || !applyLink) {
+    return null;
+  }
+
+  const completeDescription = stripHtml(job.content || "");
+
+  const rawLocation =
+    job.location?.name?.trim() ||
+    company.defaultLocation ||
+    "Global";
+
+  const location = normalizeLocation(rawLocation);
+  const country = detectCountry(rawLocation);
+  const description = extractJobDescription(
+    completeDescription
+  );
+
+  const responsibilities = extractSection(completeDescription, [
+    "responsibilities",
+    "roles and responsibilities",
+    "key responsibilities",
+    "your responsibilities",
+    "what you will do",
+    "what you'll do",
+    "what you’ll do",
+    "day to day",
+    "day-to-day",
+    "what your day will look like",
+    "what you deliver",
+    "what you will deliver",
+    "key deliverables",
+    "your impact",
+    "what you will achieve",
+  ]);
+
+  const eligibility = extractSection(completeDescription, [
+    "eligibility",
+    "qualifications",
+    "required qualifications",
+    "minimum requirements",
+    "requirements",
+    "who you are",
+    "what we are looking for",
+    "what we're looking for",
+    "what we’re looking for",
+    "what we are looking for in you",
+    "technical and professional requirements",
+    "eligibility criteria",
+    "educational qualification",
+    "educational qualifications",
+  ]);
+
+  const benefits = extractSection(completeDescription, [
+    "benefits",
+    "benefits and perks",
+    "benefits & perks",
+    "perks",
+    "what we offer",
+    "what we offer colleagues",
+    "why join us",
+    "why razorpay",
+    "our offer",
+    "employee benefits",
+    "rewards and benefits",
+  ]);
+
+  const selectionProcess = extractSection(completeDescription, [
+    "selection process",
+    "interview process",
+  ]);
+
+  const requiredSkills =
+    extractRequiredSkills(completeDescription);
+
+  const skills = extractSkills(completeDescription);
+
+  const cleanedResponsibilities =
+    cleanExtractedSection(responsibilities);
+
+  const cleanedEligibility =
+    cleanExtractedSection(eligibility);
+
+  const cleanedBenefits =
+    cleanExtractedSection(benefits);
+
+  const cleanedSelectionProcess =
+    cleanExtractedSection(selectionProcess);
+
+  const experience = extractExperience(
+    completeDescription
+  );
+
+  const sourceCreatedAt =
+    parseDate(job.first_published)?.toISOString() ||
+    null;
+
+  const sourceUpdatedAt =
+    parseDate(job.updated_at)?.toISOString() ||
+    sourceCreatedAt;
+
+  return {
+    uniqueKey:
+      `greenhouse_${company.boardId}_${sourceJobId}`,
+
+    source: "greenhouse",
+    sourceJobId,
+    sourceCompanyId: company.boardId,
+    sourceUrl: applyLink,
+
+    company: company.name,
+    companySlug: company.slug,
+    companyLogo: company.logo || "",
+
+    role,
+    location,
+    country,
+
+    description,
+    responsibilities:
+      cleanedResponsibilities.join("\n"),
+    eligibility:
+      cleanedEligibility.join("\n"),
+    benefits: cleanedBenefits.join("\n"),
+    selectionProcess:
+      cleanedSelectionProcess.join("\n"),
+
+    experience,
+    education: extractEducation(
+      completeDescription
+    ),
+    salary: extractSalary(
+      completeDescription
+    ),
+
+    skills,
+    requiredSkills,
+
+    jobType: "Private Job",
+    category: determineGreenhouseCategory(
+      role,
+      completeDescription,
+      location,
+      experience
+    ),
+
+    applyLink,
+
+    workMode: detectWorkMode(
+      rawLocation,
+      completeDescription
+    ),
+
+    employmentType: extractEmploymentType(
+      job,
+      completeDescription
+    ),
+    lastDate:
+      job.application_deadline?.trim() || "",
+
+    importedAutomatically: true,
+    trustedCompany: company.trusted,
+
+    reviewStatus: "pending",
+    processingStatus: "completed",
+    status: "draft",
+    isActive: true,
+
+    sourceCreatedAt,
+    sourceUpdatedAt,
+
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 export async function fetchGreenhouseJobs(
   company: GreenhouseCompany
 ): Promise<NormalizedImportedJob[]> {
-  const url = `https://boards-api.greenhouse.io/v1/boards/${company.boardId}/jobs?content=true`;
+  const boardId = company.boardId?.trim();
+
+  if (!boardId) {
+    throw new Error(
+      `${company.name} is missing its Greenhouse boardId.`
+    );
+  }
+
+  const url =
+    `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(
+      boardId
+    )}/jobs?content=true`;
 
   const response = await fetch(url, {
     headers: {
@@ -686,106 +1230,45 @@ export async function fetchGreenhouseJobs(
     );
   }
 
-  const data: GreenhouseResponse = await response.json();
+  const data: GreenhouseResponse =
+    await response.json();
 
-  return data.jobs.map((job) => {
-    const description = stripHtml(job.content || "");
-    const location =
-      job.location?.name?.trim() || "Not Mentioned";
+  if (!Array.isArray(data.jobs)) {
+    throw new Error(
+      `${company.name} Greenhouse API returned an unexpected response.`
+    );
+  }
 
-    const responsibilities = extractSection(description, [
-      "responsibilities",
-      "roles and responsibilities",
-      "key responsibilities",
-      "your responsibilities",
-      "what you will do",
-      "what you'll do",
-      "what you’ll do",
-      "day to day",
-      "day-to-day",
-    ]);
+  const jobs: NormalizedImportedJob[] = [];
+  const seenUniqueKeys = new Set<string>();
 
-    const eligibility = extractSection(description, [
-      "eligibility",
-      "qualifications",
-      "required qualifications",
-      "minimum requirements",
-      "requirements",
-      "who you are",
-      "what we are looking for",
-      "what we're looking for",
-      "what we’re looking for",
-    ]);
+  const eligibleJobs = data.jobs
+    .filter(isActiveGreenhouseJob)
+    .sort((first, second) => {
+      const firstTime =
+        getGreenhouseJobDate(first)?.getTime() || 0;
+      const secondTime =
+        getGreenhouseJobDate(second)?.getTime() || 0;
 
-    const benefits = extractSection(description, [
-      "benefits",
-      "benefits and perks",
-      "benefits & perks",
-      "perks",
-      "what we offer",
-      "why join us",
-      "why razorpay",
-    ]);
+      return secondTime - firstTime;
+    });
 
-    const selectionProcess = extractSection(description, [
-      "selection process",
-      "interview process",
-    ]);
+  for (const job of eligibleJobs) {
+    const normalized = normalizeGreenhouseJob(
+      company,
+      job
+    );
 
-    const requiredSkills =
-      extractRequiredSkills(description);
+    if (
+      !normalized ||
+      seenUniqueKeys.has(normalized.uniqueKey)
+    ) {
+      continue;
+    }
 
-    const skills = extractSkills(description);
+    seenUniqueKeys.add(normalized.uniqueKey);
+    jobs.push(normalized);
+  }
 
-    return {
-      uniqueKey: `greenhouse_${company.boardId}_${job.id}`,
-
-      source: "greenhouse",
-      sourceJobId: String(job.id),
-      sourceCompanyId: company.boardId,
-      sourceUrl: job.absolute_url,
-
-      company: company.name,
-      companySlug: company.slug,
-      companyLogo: company.logo || "",
-
-      role: job.title.trim(),
-      location,
-      country: "India",
-
-      description,
-      responsibilities: responsibilities.join("\n"),
-      eligibility: eligibility.join("\n"),
-      benefits: benefits.join("\n"),
-      selectionProcess: selectionProcess.join("\n"),
-
-      experience: extractExperience(description),
-      education: extractEducation(description),
-      salary: extractSalary(description),
-
-      skills,
-      requiredSkills,
-
-      jobType: "Private Job",
-      category: determineJobCategory(
-        job.title,
-        description,
-        location
-      ),
-
-      applyLink: job.absolute_url,
-
-      importedAutomatically: true,
-      trustedCompany: company.trusted,
-
-      reviewStatus: "pending",
-      status: "draft",
-      isActive: true,
-
-      sourceCreatedAt: null,
-      sourceUpdatedAt: job.updated_at || null,
-
-      fetchedAt: new Date().toISOString(),
-    };
-  });
+  return jobs;
 }

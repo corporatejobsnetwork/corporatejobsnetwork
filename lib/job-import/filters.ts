@@ -1,3 +1,7 @@
+import { looksLikeNonJobPage } from "@/lib/job-content-cleaner";
+
+import { isStillActiveJob } from "./job-date-filter";
+
 import type {
   ImportedJobCategory,
   NormalizedImportedJob,
@@ -23,8 +27,17 @@ const INDIA_LOCATION_KEYWORDS = [
   "cochin",
   "ahmedabad",
   "jaipur",
+  "bhubaneswar",
+  "trivandrum",
+  "thiruvananthapuram",
+  "mangaluru",
+  "mangalore",
+  "hubballi",
+  "hubli",
   "remote india",
   "remote - india",
+  "remote, india",
+  "india remote",
 ];
 
 const FRESHER_KEYWORDS = [
@@ -33,9 +46,18 @@ const FRESHER_KEYWORDS = [
   "entry level",
   "entry-level",
   "new graduate",
+  "new graduates",
   "recent graduate",
+  "recent graduates",
+  "new grad",
+  "new grads",
+  "early career",
+  "early careers",
   "campus hiring",
   "campus recruitment",
+  "graduate program",
+  "graduate programme",
+  "graduate engineer trainee",
   "0 year",
   "0 years",
   "0-1 year",
@@ -58,15 +80,6 @@ const FRESHERS_AND_EXPERIENCED_KEYWORDS = [
   "0-4 years",
   "0–4 years",
   "0 to 4 years",
-];
-
-const INTERNSHIP_KEYWORDS = [
-  "intern",
-  "internship",
-  "apprentice",
-  "apprenticeship",
-  "graduate trainee",
-  "management trainee",
 ];
 
 const WORK_FROM_HOME_KEYWORDS = [
@@ -100,6 +113,27 @@ const EXPERIENCED_ROLE_KEYWORDS = [
   "staff engineer",
 ];
 
+const BLOCKED_ROLE_TITLES = [
+  "our culture",
+  "recruitment fraud alert",
+  "recruitment fraud",
+  "hear from our employees",
+  "employee stories",
+  "about us",
+  "talent pulse report",
+  "alumni",
+  "experienced professionals",
+  "explore opportunities",
+  "explore openings",
+  "apply now",
+  "contact us",
+  "privacy policy",
+  "terms and conditions",
+  "cookie policy",
+];
+
+const MINIMUM_DESCRIPTION_LENGTH = 80;
+
 function normalizeText(value: string): string {
   return value
     .replace(/<[^>]*>/g, " ")
@@ -110,15 +144,22 @@ function normalizeText(value: string): string {
     .toLowerCase();
 }
 
-function includesAny(value: string, keywords: string[]): boolean {
+function includesAny(
+  value: string,
+  keywords: string[]
+): boolean {
   const normalizedValue = normalizeText(value);
 
   return keywords.some((keyword) =>
-    normalizedValue.includes(normalizeText(keyword))
+    normalizedValue.includes(
+      normalizeText(keyword)
+    )
   );
 }
 
-function hasExperiencedRequirement(value: string): boolean {
+function hasExperiencedRequirement(
+  value: string
+): boolean {
   const normalizedValue = normalizeText(value);
 
   const experiencedPatterns = [
@@ -129,15 +170,225 @@ function hasExperiencedRequirement(value: string): boolean {
     /\b[1-9]\d*\s*years?\s+of\s+experience\b/,
   ];
 
-  return experiencedPatterns.some((pattern) => pattern.test(normalizedValue));
+  return experiencedPatterns.some((pattern) =>
+    pattern.test(normalizedValue)
+  );
 }
 
-export function isIndiaJob(location: string): boolean {
-  if (!location.trim()) {
+function hasFresherRoleSignal(
+  role: string,
+  description: string
+): boolean {
+  const normalizedRole = normalizeText(role);
+  const normalizedDescription =
+    normalizeText(description);
+
+  const fresherRolePatterns = [
+    /\bjunior\b/,
+    /\bentry[- ]level\b/,
+    /\bassociate software engineer\b/,
+    /\bassociate engineer\b/,
+    /\bgraduate engineer trainee\b/,
+    /\bnew graduate\b/,
+    /\bearly career\b/,
+  ];
+
+  if (
+    fresherRolePatterns.some((pattern) =>
+      pattern.test(normalizedRole)
+    )
+  ) {
+    return true;
+  }
+
+  const explicitDescriptionPatterns = [
+    /\bnew graduates?\b/,
+    /\brecent graduates?\b/,
+    /\bearly careers?\b/,
+    /\bentry[- ]level candidates?\b/,
+    /\bjunior career path\b/,
+    /\b0\s*(?:-|–|to)\s*[12]\s*years?\b/,
+    /\bno experience required\b/,
+  ];
+
+  return explicitDescriptionPatterns.some(
+    (pattern) =>
+      pattern.test(normalizedDescription)
+  );
+}
+
+function hasJobSignals(
+  job: NormalizedImportedJob
+): boolean {
+  const text = normalizeText(
+    [
+      job.role,
+      job.description,
+      job.responsibilities,
+      job.eligibility,
+      job.education,
+      job.experience,
+      Array.isArray(job.skills)
+        ? job.skills.join(" ")
+        : "",
+      Array.isArray(job.requiredSkills)
+        ? job.requiredSkills.join(" ")
+        : "",
+    ].join(" ")
+  );
+
+  const signals = [
+    "responsibilities",
+    "requirements",
+    "qualifications",
+    "experience",
+    "skills",
+    "job description",
+    "role",
+    "degree",
+    "candidate",
+    "apply",
+  ];
+
+  return (
+    signals.filter((signal) =>
+      text.includes(signal)
+    ).length >= 2
+  );
+}
+
+function isBlockedRole(role: string): boolean {
+  const normalizedRole = normalizeText(role);
+
+  return BLOCKED_ROLE_TITLES.some(
+    (blockedTitle) =>
+      normalizedRole === blockedTitle ||
+      normalizedRole.startsWith(
+        `${blockedTitle} `
+      )
+  );
+}
+
+export function isIndiaJob(
+  location: string,
+  country = ""
+): boolean {
+  const searchableLocation =
+    `${location} ${country}`.trim();
+
+  if (!searchableLocation) {
     return false;
   }
 
-  return includesAny(location, INDIA_LOCATION_KEYWORDS);
+  return includesAny(
+    searchableLocation,
+    INDIA_LOCATION_KEYWORDS
+  );
+}
+
+export function inferExperience(
+  role: string,
+  description: string,
+  existingExperience = ""
+): string {
+  const currentExperience =
+    existingExperience.trim();
+
+  if (
+    currentExperience &&
+    !/^not mentioned$/i.test(
+      currentExperience
+    )
+  ) {
+    return currentExperience;
+  }
+
+  const normalizedRole =
+    normalizeText(role);
+
+  const normalizedDescription =
+    normalizeText(description);
+
+  const combinedText =
+    `${normalizedRole} ${normalizedDescription}`;
+
+  if (
+    /\b(intern|internship)\b/.test(
+      normalizedRole
+    )
+  ) {
+    return "Internship";
+  }
+
+  if (
+    hasFresherRoleSignal(
+      role,
+      description
+    )
+  ) {
+    return "0-2 years";
+  }
+
+  const rangeMatch = combinedText.match(
+    /\b(\d+)\s*(?:-|–|to)\s*(\d+)\s*years?\b/
+  );
+
+  if (rangeMatch) {
+    return `${rangeMatch[1]}-${rangeMatch[2]} years`;
+  }
+
+  const plusMatch = combinedText.match(
+    /\b(\d+)\s*\+\s*years?\b/
+  );
+
+  if (plusMatch) {
+    return `${plusMatch[1]}+ years`;
+  }
+
+  const minimumMatch = combinedText.match(
+    /\b(?:minimum\s+(?:of\s+)?|at\s+least\s+)(\d+)\s*years?\b/
+  );
+
+  if (minimumMatch) {
+    return `${minimumMatch[1]}+ years`;
+  }
+
+  if (
+    /\bprincipal\b|\bdirector\b|\bhead of\b|\bvice president\b|\bvp\b/.test(
+      normalizedRole
+    )
+  ) {
+    return "10+ years";
+  }
+
+  if (
+    /\bstaff engineer\b|\blead\b|\bmanager\b|\barchitect\b/.test(
+      normalizedRole
+    )
+  ) {
+    return "7+ years";
+  }
+
+  if (
+    /\bsenior\b|\bspecialist\b|\bconsultant\b/.test(
+      normalizedRole
+    )
+  ) {
+    return "5+ years";
+  }
+
+  if (
+    /\bexperience (?:programming|working|building|developing|designing|managing|leading|with|in)\b/.test(
+      normalizedDescription
+    ) ||
+    /\byou have experience\b|\bproven experience\b|\brelevant experience\b/.test(
+      normalizedDescription
+    )
+  ) {
+    return "Relevant Experience Preferred";
+  }
+
+  return "Not Mentioned";
 }
 
 export function determineJobCategory(
@@ -145,31 +396,69 @@ export function determineJobCategory(
   description: string,
   location: string
 ): ImportedJobCategory {
-  const searchableText = `${role} ${description} ${location}`;
+  const searchableText =
+    `${role} ${description} ${location}`;
 
-  if (includesAny(searchableText, INTERNSHIP_KEYWORDS)) {
+  const normalizedRole =
+    normalizeText(role);
+
+  if (
+    /\b(intern|internship|apprentice|apprenticeship)\b/.test(
+      normalizedRole
+    ) ||
+    /\bthis is an internship\b|\binternship opportunity\b|\bapprenticeship opportunity\b/i.test(
+      searchableText
+    )
+  ) {
     return "internship";
   }
 
-  if (includesAny(searchableText, WALK_IN_KEYWORDS)) {
+  if (
+    includesAny(
+      searchableText,
+      WALK_IN_KEYWORDS
+    )
+  ) {
     return "walk-in-drive";
   }
 
-  if (includesAny(searchableText, WORK_FROM_HOME_KEYWORDS)) {
+  if (
+    includesAny(
+      searchableText,
+      WORK_FROM_HOME_KEYWORDS
+    )
+  ) {
     return "work-from-home";
   }
 
-  if (includesAny(searchableText, FRESHERS_AND_EXPERIENCED_KEYWORDS)) {
+  if (
+    includesAny(
+      searchableText,
+      FRESHERS_AND_EXPERIENCED_KEYWORDS
+    )
+  ) {
     return "freshers-experienced";
   }
 
-  if (includesAny(searchableText, FRESHER_KEYWORDS)) {
+  if (
+    includesAny(
+      searchableText,
+      FRESHER_KEYWORDS
+    ) ||
+    hasFresherRoleSignal(
+      role,
+      description
+    )
+  ) {
     return "freshers";
   }
 
   if (
     hasExperiencedRequirement(searchableText) ||
-    includesAny(role, EXPERIENCED_ROLE_KEYWORDS)
+    includesAny(
+      role,
+      EXPERIENCED_ROLE_KEYWORDS
+    )
   ) {
     return "experienced";
   }
@@ -177,24 +466,53 @@ export function determineJobCategory(
   return "experienced";
 }
 
-export function shouldImportJob(job: NormalizedImportedJob): boolean {
-  if (!job.role.trim()) {
+export function shouldImportJob(
+  job: NormalizedImportedJob
+): boolean {
+  const role = job.role?.trim() || "";
+  const company = job.company?.trim() || "";
+  const applyLink =
+    job.applyLink?.trim() || "";
+  const sourceJobId =
+    job.sourceJobId?.trim() || "";
+  const description =
+    job.description?.trim() || "";
+
+  if (!role || !company) {
     return false;
   }
 
-  if (!job.company.trim()) {
+  if (!applyLink || !sourceJobId) {
     return false;
   }
 
-  if (!job.applyLink.trim()) {
+  if (isBlockedRole(role)) {
     return false;
   }
 
-  if (!job.sourceJobId.trim()) {
+  if (
+    looksLikeNonJobPage(
+      role,
+      description
+    )
+  ) {
     return false;
   }
 
-  if (!isIndiaJob(job.location)) {
+  if (
+    description.length <
+      MINIMUM_DESCRIPTION_LENGTH &&
+    !job.responsibilities?.trim() &&
+    !job.eligibility?.trim()
+  ) {
+    return false;
+  }
+
+  if (!hasJobSignals(job)) {
+    return false;
+  }
+
+  if (!isStillActiveJob(job.lastDate)) {
     return false;
   }
 

@@ -15,6 +15,7 @@ type SectionName =
 
 const SECTION_HEADINGS: Record<SectionName, string[]> = {
   description: [
+    "about the job",
     "about the role",
     "about this role",
     "job description",
@@ -45,7 +46,6 @@ const SECTION_HEADINGS: Record<SectionName, string[]> = {
     "what success looks like",
     "what you can expect",
     "day to day responsibilities",
-    "the role",
   ],
 
   requirements: [
@@ -58,6 +58,7 @@ const SECTION_HEADINGS: Record<SectionName, string[]> = {
     "preferred qualifications",
     "skills required",
     "required skills",
+    "preferred skills",
     "skills and experience",
     "experience required",
     "what you need",
@@ -71,7 +72,10 @@ const SECTION_HEADINGS: Record<SectionName, string[]> = {
     "must have",
     "good to have",
     "technical requirements",
+    "technical requirement",
     "professional requirements",
+    "educational requirements",
+    "education requirements",
   ],
 
   benefits: [
@@ -116,6 +120,41 @@ const STOP_PATTERNS = [
   /we are an equal opportunity employer/i,
 ];
 
+const REQUIREMENT_LINE_PATTERNS: RegExp[] = [
+  /^strong experience\b/i,
+  /^proven experience\b/i,
+  /^hands-on experience\b/i,
+  /^experience (?:with|in|of)\b/i,
+  /^good understanding\b/i,
+  /^strong understanding\b/i,
+  /^solid understanding\b/i,
+  /^proficiency in\b/i,
+  /^proficient in\b/i,
+  /^knowledge of\b/i,
+  /^working knowledge\b/i,
+  /^familiarity with\b/i,
+  /^must have\b/i,
+  /^required\b/i,
+  /^minimum\b/i,
+  /^preferred\b/i,
+  /^qualification\b/i,
+  /^qualifications\b/i,
+  /^bachelor(?:'s)?\b/i,
+  /^master(?:'s)?\b/i,
+  /^degree\b/i,
+  /^graduate\b/i,
+  /^postgraduate\b/i,
+  /^ability to\b/i,
+  /^excellent\b/i,
+  /^good communication\b/i,
+  /^strong communication\b/i,
+  /^analytical\b/i,
+  /^strong analytical\b/i,
+  /^problem[- ]solving\b/i,
+  /^\d+\+?\s*years?\b/i,
+  /^\d+\s*(?:-|–|to)\s*\d+\s*years?\b/i,
+];
+
 function normalizeText(value = ""): string {
   return value
     .replace(/\r\n/g, "\n")
@@ -135,21 +174,25 @@ function normalizeHeading(value: string): string {
     .trim();
 }
 
+function normalizeForDuplicateCheck(value: string): string {
+  return removeBulletPrefix(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function removeBulletPrefix(value: string): string {
   return value
-    .replace(/^[•●▪◦‣⁃\-–—*›»]+\s*/, "")
+    .replace(/^[•●▪◦‣⁃□☐\-–—*›»]+\s*/, "")
     .replace(/^\d+[.)]\s*/, "")
     .trim();
 }
 
 function isLikelyHeading(line: string): boolean {
-  const cleaned = line.trim();
+  const cleaned = removeBulletPrefix(line.trim());
 
-  if (!cleaned) {
-    return false;
-  }
-
-  if (cleaned.length > 80) {
+  if (!cleaned || cleaned.length > 80) {
     return false;
   }
 
@@ -161,11 +204,13 @@ function isLikelyHeading(line: string): boolean {
 }
 
 function getSectionName(line: string): SectionName | null {
-  if (!isLikelyHeading(line)) {
+  const cleanedLine = removeBulletPrefix(line);
+
+  if (!isLikelyHeading(cleanedLine)) {
     return null;
   }
 
-  const normalizedLine = normalizeHeading(line);
+  const normalizedLine = normalizeHeading(cleanedLine);
 
   for (const [sectionName, headings] of Object.entries(
     SECTION_HEADINGS
@@ -194,7 +239,9 @@ function escapeRegExp(value: string): string {
 function getInlineSection(
   line: string
 ): { section: SectionName; content: string } | null {
-  const normalizedLine = line.trim().replace(/’/g, "'");
+  const normalizedLine = removeBulletPrefix(line)
+    .trim()
+    .replace(/’/g, "'");
 
   for (const [sectionName, headings] of Object.entries(
     SECTION_HEADINGS
@@ -240,17 +287,56 @@ function removeFooterContent(value: string): string {
   return lines.slice(0, stopIndex).join("\n").trim();
 }
 
-function formatBulletSection(value: string): string {
-  return value
-    .split("\n")
-    .map((line) => removeBulletPrefix(line))
+function looksLikeRequirementLine(line: string): boolean {
+  const cleaned = removeBulletPrefix(line);
+
+  if (!cleaned) {
+    return false;
+  }
+
+  return REQUIREMENT_LINE_PATTERNS.some((pattern) =>
+    pattern.test(cleaned)
+  );
+}
+
+function removeDuplicates(
+  lines: string[],
+  globalSeen: Set<string>
+): string[] {
+  const localSeen = new Set<string>();
+
+  return lines.filter((line) => {
+    const key = normalizeForDuplicateCheck(line);
+
+    if (!key) {
+      return false;
+    }
+
+    if (localSeen.has(key) || globalSeen.has(key)) {
+      return false;
+    }
+
+    localSeen.add(key);
+    globalSeen.add(key);
+    return true;
+  });
+}
+
+function formatBulletSection(lines: string[]): string {
+  return lines
+    .map(removeBulletPrefix)
     .filter(Boolean)
     .map((line) => `• ${line}`)
     .join("\n");
 }
 
-function cleanDescription(value: string): string {
-  const paragraphs = value
+function formatDescription(lines: string[]): string {
+  const text = lines
+    .map(removeBulletPrefix)
+    .filter(Boolean)
+    .join("\n");
+
+  const paragraphs = text
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
@@ -258,7 +344,9 @@ function cleanDescription(value: string): string {
   return paragraphs.slice(0, 3).join("\n\n");
 }
 
-export function parseJobSections(rawContent?: string): ParsedJobSections {
+export function parseJobSections(
+  rawContent?: string
+): ParsedJobSections {
   const normalized = normalizeText(rawContent || "");
   const cleanedContent = removeFooterContent(normalized);
 
@@ -282,11 +370,7 @@ export function parseJobSections(rawContent?: string): ParsedJobSections {
     const inlineSection = getInlineSection(line);
 
     if (inlineSection) {
-      activeSection =
-        inlineSection.section === "description"
-          ? "responsibilities"
-          : inlineSection.section;
-
+      activeSection = inlineSection.section;
       sections[activeSection].push(inlineSection.content);
       continue;
     }
@@ -294,11 +378,15 @@ export function parseJobSections(rawContent?: string): ParsedJobSections {
     const detectedSection = getSectionName(line);
 
     if (detectedSection) {
-      activeSection =
-        detectedSection === "description" && normalizeHeading(line) === "the role"
-          ? "responsibilities"
-          : detectedSection;
+      activeSection = detectedSection;
       continue;
+    }
+
+    if (
+      activeSection === "responsibilities" &&
+      looksLikeRequirementLine(line)
+    ) {
+      activeSection = "requirements";
     }
 
     if (activeSection) {
@@ -308,20 +396,50 @@ export function parseJobSections(rawContent?: string): ParsedJobSections {
     }
   }
 
-  const descriptionSource =
-    sections.description.length > 0
-      ? sections.description.join("\n")
-      : contentBeforeFirstHeading.join("\n");
+  if (sections.description.length === 0) {
+    sections.description.push(...contentBeforeFirstHeading);
+  } else if (contentBeforeFirstHeading.length > 0) {
+    sections.description.unshift(...contentBeforeFirstHeading);
+  }
+
+  const globalSeen = new Set<string>();
+
+  const descriptionLines = removeDuplicates(
+    sections.description,
+    globalSeen
+  );
+
+  const responsibilityLines = removeDuplicates(
+    sections.responsibilities,
+    globalSeen
+  );
+
+  const requirementLines = removeDuplicates(
+    sections.requirements,
+    globalSeen
+  );
+
+  const benefitLines = removeDuplicates(
+    sections.benefits,
+    globalSeen
+  );
+
+  const selectionLines = removeDuplicates(
+    sections.selectionProcess,
+    globalSeen
+  );
 
   return {
-    description: cleanDescription(descriptionSource),
+    description: formatDescription(descriptionLines),
     responsibilities: formatBulletSection(
-      sections.responsibilities.join("\n")
+      responsibilityLines
     ),
-    requirements: formatBulletSection(sections.requirements.join("\n")),
-    benefits: formatBulletSection(sections.benefits.join("\n")),
+    requirements: formatBulletSection(
+      requirementLines
+    ),
+    benefits: formatBulletSection(benefitLines),
     selectionProcess: formatBulletSection(
-      sections.selectionProcess.join("\n")
+      selectionLines
     ),
   };
 }

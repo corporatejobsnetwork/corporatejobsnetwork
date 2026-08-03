@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Job importer test outputs
+environment.json
+greenhouse-canonical.json
+greenhouse-test.json
+infosys-env.js
+infosys-environment-output.txt
+infosys-environment.json
+infosys-jobs-page.html
+infosys-jobs.json
+infosys-main.js
+infosys-search-output.txt

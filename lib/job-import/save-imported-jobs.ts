@@ -97,17 +97,10 @@ async function flushBatch(
   batchItems: Array<{
     job: NormalizedImportedJob;
     documentId: string;
-    exists: boolean;
   }>
-): Promise<{
-  created: number;
-  updated: number;
-}> {
+): Promise<number> {
   if (batchItems.length === 0) {
-    return {
-      created: 0,
-      updated: 0,
-    };
+    return 0;
   }
 
   const batch = writeBatch(db);
@@ -119,40 +112,16 @@ async function flushBatch(
       item.documentId
     );
 
-    const payload = toFirestoreImportedJob(
-      item.job
-    );
-
-    if (item.exists) {
-      batch.set(
-        importedJobRef,
-        {
-          ...payload,
-          importedAt: serverTimestamp(),
-        },
-        {
-          merge: true,
-        }
-      );
-    } else {
-      batch.set(importedJobRef, {
-        ...payload,
-        createdAt: serverTimestamp(),
-        importedAt: serverTimestamp(),
-      });
-    }
+    batch.set(importedJobRef, {
+      ...toFirestoreImportedJob(item.job),
+      createdAt: serverTimestamp(),
+      importedAt: serverTimestamp(),
+    });
   }
 
   await batch.commit();
 
-  return {
-    created: batchItems.filter(
-      (item) => !item.exists
-    ).length,
-    updated: batchItems.filter(
-      (item) => item.exists
-    ).length,
-  };
+  return batchItems.length;
 }
 
 export async function saveImportedJobs(
@@ -176,17 +145,14 @@ export async function saveImportedJobs(
   let pendingBatch: Array<{
     job: NormalizedImportedJob;
     documentId: string;
-    exists: boolean;
   }> = [];
 
   const flushPendingBatch = async () => {
-    const batchResult = await flushBatch(
+    const createdCount = await flushBatch(
       pendingBatch
     );
 
-    result.created += batchResult.created;
-    result.updated += batchResult.updated;
-
+    result.created += createdCount;
     pendingBatch = [];
   };
 
@@ -217,19 +183,23 @@ export async function saveImportedJobs(
       const existingJobId =
         await findExistingImportedJobId(uniqueKey);
 
-      const documentId =
-        existingJobId ||
-        doc(
-          collection(
-            db,
-            IMPORTED_JOBS_COLLECTION
-          )
-        ).id;
+      // Existing Firestore job: do not update or import it again.
+      if (existingJobId) {
+        result.skipped += 1;
+        result.duplicates += 1;
+        continue;
+      }
+
+      const documentId = doc(
+        collection(
+          db,
+          IMPORTED_JOBS_COLLECTION
+        )
+      ).id;
 
       pendingBatch.push({
         job,
         documentId,
-        exists: Boolean(existingJobId),
       });
 
       if (

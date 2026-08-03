@@ -1,18 +1,30 @@
 import type { TrustedCompany } from "./types";
 
+/**
+ * Master trusted-company configuration.
+ */
 export const trustedCompanies: TrustedCompany[] = [
+  {
+  name: "Canonical",
+  slug: "canonical",
+  provider: "greenhouse",
+  boardId: "canonical",
+  careersUrl:
+    "https://boards.greenhouse.io/canonical",
+  enabled: true,
+  trusted: true,
+  logo: "",
+  country: "Global",
+  defaultLocation: "India",
+},
   {
     name: "Infosys",
     slug: "infosys",
     provider: "custom",
-
-    // Updated to the actual jobs listing page
     careersUrl:
-      "https://careers.infosys.com/instep/aspx/InfosysLCAPostings.aspx",
-
+      "https://career.infosys.com/jobs?companyhiringtype=IL&countrycode=IN",
     apiUrl:
-      "https://careers.infosys.com/instep/aspx/InfosysLCAPostings.aspx",
-
+      "https://career.infosys.com/jobs?companyhiringtype=IL&countrycode=IN",
     boardId: "infosys",
     enabled: true,
     trusted: true,
@@ -20,17 +32,176 @@ export const trustedCompanies: TrustedCompany[] = [
     country: "India",
     defaultLocation: "India",
   },
+  {
+    name: "TCS",
+    slug: "tcs",
+    provider: "custom",
+    careersUrl: "https://www.tcs.com/careers",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/tcs.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Wipro",
+    slug: "wipro",
+    provider: "custom",
+    careersUrl: "https://careers.wipro.com/",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/wipro.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Accenture",
+    slug: "accenture",
+    provider: "custom",
+    careersUrl: "https://www.accenture.com/in-en/careers/jobsearch",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/accenture.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "IBM",
+    slug: "ibm",
+    provider: "custom",
+    careersUrl: "https://www.ibm.com/careers/search",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/ibm.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Capgemini",
+    slug: "capgemini",
+    provider: "custom",
+    careersUrl: "https://www.capgemini.com/careers/",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/capgemini.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Cognizant",
+    slug: "cognizant",
+    provider: "custom",
+    careersUrl: "https://careers.cognizant.com/global-en/",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/cognizant.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "HCLTech",
+    slug: "hcltech",
+    provider: "custom",
+    careersUrl: "https://www.hcltech.com/careers",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/hcltech.png",
+    country: "India",
+    defaultLocation: "India",
+  },
 
-  // Add additional companies below as we integrate them.
-  // Supported providers:
-  // greenhouse
-  // lever
-  // ashby
-  // workday
-  // smartrecruiters
-  // successfactors
-  // oracle
-  // custom
+  // ✅ ENABLED COMPANY
+  {
+    name: "Oracle",
+    slug: "oracle",
+    provider: "oracle",
+    careersUrl: "https://careers.oracle.com/jobs/",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/oracle.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+
+  {
+    name: "Google",
+    slug: "google",
+    provider: "custom",
+    careersUrl:
+      "https://www.google.com/about/careers/applications/jobs/results/",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/google.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Microsoft",
+    slug: "microsoft",
+    provider: "custom",
+    careersUrl: "https://jobs.careers.microsoft.com/global/en/search",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/microsoft.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Amazon",
+    slug: "amazon",
+    provider: "custom",
+    careersUrl: "https://www.amazon.jobs/en/search",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/amazon.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "Deloitte",
+    slug: "deloitte",
+    provider: "custom",
+    careersUrl:
+      "https://www2.deloitte.com/in/en/careers/search-jobs.html",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/deloitte.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "EY",
+    slug: "ey",
+    provider: "custom",
+    careersUrl: "https://careers.ey.com/",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/ey.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "PwC",
+    slug: "pwc",
+    provider: "custom",
+    careersUrl: "https://www.pwc.in/careers.html",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/pwc.png",
+    country: "India",
+    defaultLocation: "India",
+  },
+  {
+    name: "KPMG",
+    slug: "kpmg",
+    provider: "custom",
+    careersUrl: "https://kpmg.com/in/en/home/careers.html",
+    enabled: false,
+    trusted: true,
+    logo: "/logos/kpmg.png",
+    country: "India",
+    defaultLocation: "India",
+  },
 ];
 
 export function getEnabledTrustedCompanies(): TrustedCompany[] {
