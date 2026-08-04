@@ -231,6 +231,12 @@ export default function ImportedJobsTable() {
   const [publishingAll, setPublishingAll] =
     useState(false);
 
+  const [publishingSelected, setPublishingSelected] =
+    useState(false);
+
+  const [selectedJobIds, setSelectedJobIds] =
+    useState<Set<string>>(new Set());
+
   const [deletingAll, setDeletingAll] =
     useState(false);
 
@@ -256,7 +262,9 @@ export default function ImportedJobsTable() {
     useState("");
 
   const bulkOperationRunning =
-    publishingAll || deletingAll;
+    publishingAll ||
+    publishingSelected ||
+    deletingAll;
 
   useEffect(() => {
     const importedJobsQuery = query(
@@ -278,6 +286,24 @@ export default function ImportedJobsTable() {
         );
 
         setJobs(importedJobs);
+
+        setSelectedJobIds((currentSelection) => {
+          const availableIds = new Set(
+            importedJobs
+              .filter(
+                (job) =>
+                  job.status !== "published"
+              )
+              .map((job) => job.id)
+          );
+
+          return new Set(
+            [...currentSelection].filter((id) =>
+              availableIds.has(id)
+            )
+          );
+        });
+
         setLoading(false);
         setErrorMessage("");
       },
@@ -337,6 +363,67 @@ export default function ImportedJobsTable() {
       );
     });
   }, [jobs, searchTerm]);
+
+  const selectableFilteredJobs = useMemo(
+    () =>
+      filteredJobs.filter(
+        (job) =>
+          getStatus(job) !== "Published"
+      ),
+    [filteredJobs]
+  );
+
+  const selectedJobs = useMemo(
+    () =>
+      jobs.filter(
+        (job) =>
+          selectedJobIds.has(job.id) &&
+          getStatus(job) !== "Published"
+      ),
+    [jobs, selectedJobIds]
+  );
+
+  const allVisibleSelected =
+    selectableFilteredJobs.length > 0 &&
+    selectableFilteredJobs.every((job) =>
+      selectedJobIds.has(job.id)
+    );
+
+  function toggleJobSelection(jobId: string) {
+    setSelectedJobIds((currentSelection) => {
+      const nextSelection = new Set(
+        currentSelection
+      );
+
+      if (nextSelection.has(jobId)) {
+        nextSelection.delete(jobId);
+      } else {
+        nextSelection.add(jobId);
+      }
+
+      return nextSelection;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedJobIds((currentSelection) => {
+      const nextSelection = new Set(
+        currentSelection
+      );
+
+      if (allVisibleSelected) {
+        selectableFilteredJobs.forEach((job) =>
+          nextSelection.delete(job.id)
+        );
+      } else {
+        selectableFilteredJobs.forEach((job) =>
+          nextSelection.add(job.id)
+        );
+      }
+
+      return nextSelection;
+    });
+  }
 
   const totalJobs = jobs.length;
 
@@ -576,6 +663,181 @@ export default function ImportedJobsTable() {
       );
     } finally {
       setPublishingJobId(null);
+    }
+  }
+
+  async function publishSelectedJobs() {
+    if (
+      bulkOperationRunning ||
+      publishingJobId
+    ) {
+      return;
+    }
+
+    if (selectedJobs.length === 0) {
+      toast.info(
+        "Select at least one pending job."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Check duplicates and publish ${selectedJobs.length} selected jobs?\n\nDuplicate jobs will be skipped.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setPublishingSelected(true);
+      setPublishSummary(null);
+
+      setPublishProgress({
+        completed: 0,
+        total: selectedJobs.length,
+      });
+
+      const jobsToPublish: ImportedJob[] = [];
+      let duplicateCount = 0;
+      let failedCount = 0;
+      let checkedCount = 0;
+
+      for (const job of selectedJobs) {
+        try {
+          const duplicate =
+            await checkMainTableDuplicate(job);
+
+          if (duplicate.isDuplicate) {
+            duplicateCount += 1;
+          } else {
+            jobsToPublish.push(job);
+          }
+        } catch (error) {
+          failedCount += 1;
+
+          console.error(
+            `Unable to check duplicate for selected imported job ${job.id}:`,
+            error
+          );
+        } finally {
+          checkedCount += 1;
+
+          setPublishProgress({
+            completed: checkedCount,
+            total: selectedJobs.length,
+          });
+        }
+      }
+
+      let publishedCount = 0;
+      const publishedIds = new Set<string>();
+
+      for (
+        let startIndex = 0;
+        startIndex < jobsToPublish.length;
+        startIndex += BULK_OPERATION_JOB_LIMIT
+      ) {
+        const currentJobs = jobsToPublish.slice(
+          startIndex,
+          startIndex + BULK_OPERATION_JOB_LIMIT
+        );
+
+        try {
+          const batch = writeBatch(db);
+
+          for (const job of currentJobs) {
+            batch.set(
+              doc(db, "jobs", job.id),
+              buildLiveJobPayload(job),
+              {
+                merge: true,
+              }
+            );
+
+            batch.update(
+              doc(db, "importedJobs", job.id),
+              {
+                status: "published",
+                reviewStatus: "published",
+                duplicateOverride: false,
+                duplicateOfJobId: "",
+                duplicateReason: "",
+                publishedAt:
+                  serverTimestamp(),
+                updatedAt:
+                  serverTimestamp(),
+              }
+            );
+          }
+
+          await batch.commit();
+
+          currentJobs.forEach((job) =>
+            publishedIds.add(job.id)
+          );
+
+          publishedCount += currentJobs.length;
+        } catch (error) {
+          failedCount += currentJobs.length;
+
+          console.error(
+            "Unable to publish a selected-job batch:",
+            error
+          );
+        }
+      }
+
+      setSelectedJobIds((currentSelection) => {
+        const nextSelection = new Set(
+          currentSelection
+        );
+
+        publishedIds.forEach((id) =>
+          nextSelection.delete(id)
+        );
+
+        return nextSelection;
+      });
+
+      const summary: PublishSummary = {
+        published: publishedCount,
+        duplicates: duplicateCount,
+        failed: failedCount,
+      };
+
+      setPublishSummary(summary);
+
+      if (
+        publishedCount > 0 &&
+        failedCount === 0
+      ) {
+        toast.success(
+          `Published ${publishedCount} selected jobs. Skipped ${duplicateCount} duplicates.`
+        );
+      } else if (publishedCount > 0) {
+        toast.warning(
+          `Published ${publishedCount}, skipped ${duplicateCount} duplicates, and failed ${failedCount}.`
+        );
+      } else if (
+        duplicateCount > 0 &&
+        failedCount === 0
+      ) {
+        toast.info(
+          `No new selected jobs were published. ${duplicateCount} duplicates were skipped.`
+        );
+      } else {
+        toast.error(
+          `No selected jobs were published. Failed: ${failedCount}.`
+        );
+      }
+    } finally {
+      setPublishingSelected(false);
+
+      setPublishProgress({
+        completed: 0,
+        total: 0,
+      });
     }
   }
 
@@ -939,6 +1201,32 @@ export default function ImportedJobsTable() {
               <button
                 type="button"
                 onClick={
+                  publishSelectedJobs
+                }
+                disabled={
+                  loading ||
+                  bulkOperationRunning ||
+                  Boolean(
+                    publishingJobId
+                  ) ||
+                  selectedJobs.length === 0
+                }
+                className="inline-flex min-w-[190px] items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600"
+              >
+                {publishingSelected ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+
+                {publishingSelected
+                  ? `Checking ${publishProgress.completed}/${publishProgress.total}`
+                  : `Publish Selected (${selectedJobs.length})`}
+              </button>
+
+              <button
+                type="button"
+                onClick={
                   publishAllPendingJobs
                 }
                 disabled={
@@ -1007,7 +1295,8 @@ export default function ImportedJobsTable() {
             </div>
           </div>
 
-          {publishingAll && (
+          {(publishingAll ||
+            publishingSelected) && (
             <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">
               Checking the main jobs table:{" "}
               {publishProgress.completed} of{" "}
@@ -1039,9 +1328,24 @@ export default function ImportedJobsTable() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[950px]">
+          <table className="w-full min-w-[1020px]">
             <thead className="bg-gray-100">
               <tr>
+                <th className="w-12 px-4 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={
+                      toggleSelectAllVisible
+                    }
+                    disabled={
+                      bulkOperationRunning ||
+                      selectableFilteredJobs.length === 0
+                    }
+                    aria-label="Select all visible pending jobs"
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left">
                   Company
                 </th>
@@ -1067,7 +1371,7 @@ export default function ImportedJobsTable() {
               {loading && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="py-16"
                   >
                     <div className="flex items-center justify-center gap-3 text-gray-500">
@@ -1085,7 +1389,7 @@ export default function ImportedJobsTable() {
                 errorMessage && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-16 text-center font-medium text-red-600"
                     >
                       {errorMessage}
@@ -1099,7 +1403,7 @@ export default function ImportedJobsTable() {
                   0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-16 text-center text-gray-500"
                     >
                       {jobs.length === 0
@@ -1128,6 +1432,26 @@ export default function ImportedJobsTable() {
                       key={job.id}
                       className="hover:bg-gray-50"
                     >
+                      <td className="px-4 py-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedJobIds.has(
+                            job.id
+                          )}
+                          onChange={() =>
+                            toggleJobSelection(
+                              job.id
+                            )
+                          }
+                          disabled={
+                            isPublished ||
+                            bulkOperationRunning
+                          }
+                          aria-label={`Select ${job.role || "job"}`}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                      </td>
+
                       <td className="px-4 py-4 font-semibold text-gray-900">
                         {job.company ||
                           "Not available"}

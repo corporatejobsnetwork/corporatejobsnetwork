@@ -45,6 +45,7 @@ const SECTION_HEADINGS = [
   "day to day",
   "day-to-day",
   "what your day will look like",
+  "what you will focus on",
   "what you deliver",
   "what you will deliver",
   "key deliverables",
@@ -80,6 +81,7 @@ const SECTION_HEADINGS = [
   "benefits & perks",
   "perks",
   "what we offer",
+  "what we offer you",
   "why join us",
   "why razorpay",
   "our offer",
@@ -564,6 +566,261 @@ function extractExperience(text: string): string {
   return "Not Mentioned";
 }
 
+function normalizeExperienceValue(
+  value: string
+): string {
+  const normalized = value
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "Not Mentioned";
+  }
+
+  if (/^freshers?$/i.test(normalized)) {
+    return "Freshers";
+  }
+
+  if (/^entry[- ]level$/i.test(normalized)) {
+    return "0-2 years";
+  }
+
+  const rangeMatch = normalized.match(
+    /\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*years?\b/i
+  );
+
+  if (rangeMatch) {
+    return `${rangeMatch[1]}-${rangeMatch[2]} years`;
+  }
+
+  const plusMatch = normalized.match(
+    /\b(\d+)\s*\+\s*years?\b/i
+  );
+
+  if (plusMatch) {
+    return `${plusMatch[1]}+ years`;
+  }
+
+  const singleYearMatch = normalized.match(
+    /\b(\d+)\s*years?\b/i
+  );
+
+  if (singleYearMatch) {
+    const years = Number(singleYearMatch[1]);
+
+    return years >= 5
+      ? `${years}+ years`
+      : `${years} years`;
+  }
+
+  return normalized;
+}
+
+function inferGreenhouseExperience(
+  role: string,
+  description: string,
+  extractedExperience: string
+): string {
+  const normalizedExtracted =
+    normalizeExperienceValue(
+      extractedExperience
+    );
+
+  if (
+    normalizedExtracted !==
+      "Not Mentioned" &&
+    normalizedExtracted !==
+      "Relevant Experience Preferred"
+  ) {
+    return normalizedExtracted;
+  }
+
+  const normalizedRole =
+    normalizeHeading(role);
+
+  const normalizedDescription =
+    description
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  const combinedText =
+    `${normalizedRole} ${normalizedDescription}`;
+
+  /*
+   * Priority 1: exact experience stated by the employer.
+   */
+  const exactRange = combinedText.match(
+    /\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*years?\b/i
+  );
+
+  if (exactRange) {
+    return `${exactRange[1]}-${exactRange[2]} years`;
+  }
+
+  const plusYears = combinedText.match(
+    /\b(\d+)\s*\+\s*years?\b/i
+  );
+
+  if (plusYears) {
+    return `${plusYears[1]}+ years`;
+  }
+
+  const minimumYears = combinedText.match(
+    /\b(?:minimum\s+(?:of\s+)?|at\s+least\s+)(\d+)\s*years?\b/i
+  );
+
+  if (minimumYears) {
+    return `${minimumYears[1]}+ years`;
+  }
+
+  const singleYear = combinedText.match(
+    /\b(\d+)\s+years?\s+of\s+experience\b/i
+  );
+
+  if (singleYear) {
+    const years = Number(singleYear[1]);
+
+    return years >= 5
+      ? `${years}+ years`
+      : `${years} years`;
+  }
+
+  /*
+   * Priority 2: internship, graduate and early-career titles.
+   */
+  if (
+    /\b(intern|internship|apprentice|apprenticeship|trainee)\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "Internship";
+  }
+
+  if (
+    /\bgraduate\b|\bnew graduate\b|\brecent graduate\b|\bcampus\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "Freshers";
+  }
+
+  if (
+    /\bjunior\b|\bentry[- ]level\b|\bassociate\b|\bearly career\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "0-2 years";
+  }
+
+  /*
+   * Priority 3: seniority and leadership titles.
+   */
+  if (
+    /\bchief\b|\bprincipal\b|\bdirector\b|\bhead of\b|\bvice president\b|\bvp\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "10+ years";
+  }
+
+  if (
+    /\bstaff\b|\blead\b|\barchitect\b|\bmanager\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "7+ years";
+  }
+
+  if (
+    /\bsenior\b|\bspecialist\b|\bconsultant\b|\baccount executive\b|\bsales executive\b|\bcustomer success manager\b|\bbusiness development executive\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "5+ years";
+  }
+
+  if (
+    /\bmid[- ]level\b|\bintermediate\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "3-5 years";
+  }
+
+  /*
+   * Priority 4: strong fresher language in the description.
+   */
+  if (
+    /\bnew graduates?\b|\brecent graduates?\b|\bearly careers?\b|\bgraduate programme\b|\bgraduate program\b|\bjunior career path\b|\bno experience required\b/i.test(
+      normalizedDescription
+    )
+  ) {
+    return "Freshers";
+  }
+
+  /*
+   * Priority 5: experience language when years are not stated.
+   */
+  const experienceSignals = [
+    /\byou have experience\b/i,
+    /\bproven experience\b/i,
+    /\brelevant experience\b/i,
+    /\bdemonstrated experience\b/i,
+    /\bprevious experience\b/i,
+    /\bprofessional experience\b/i,
+    /\bexperience driving\b/i,
+    /\bexperience managing\b/i,
+    /\bexperience building\b/i,
+    /\bexperience developing\b/i,
+    /\bexperience designing\b/i,
+    /\bexperience working\b/i,
+    /\bexperience programming\b/i,
+    /\bexperience supporting\b/i,
+    /\bexperience delivering\b/i,
+    /\bexperience with\b/i,
+    /\btrack record\b/i,
+  ];
+
+  const signalCount =
+    experienceSignals.filter((pattern) =>
+      pattern.test(normalizedDescription)
+    ).length;
+
+  if (signalCount >= 2) {
+    return "3-5 years";
+  }
+
+  /*
+   * Priority 6: safe role-based fallbacks.
+   */
+  if (
+    /\bsoftware engineer\b|\bsystem software engineer\b|\bbackend engineer\b|\bfrontend engineer\b|\bfull[- ]stack engineer\b|\bdevops engineer\b|\bsecurity engineer\b|\bqa engineer\b|\bautomation engineer\b|\bcloud engineer\b|\bsystems? engineer\b|\bplatform engineer\b|\bkernel engineer\b|\bsupport engineer\b|\bsite reliability engineer\b|\bdeveloper\b|\badministrator\b|\banalyst\b|\bdesigner\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "3-5 years";
+  }
+
+  if (
+    /\bsales development representative\b|\bbusiness development representative\b|\bchannel partner sales executive\b|\bsales representative\b|\bmarketing executive\b|\boffice administrator\b|\bproject coordinator\b|\boperations coordinator\b/i.test(
+      normalizedRole
+    )
+  ) {
+    return "2-5 years";
+  }
+
+  if (signalCount === 1) {
+    return "3-5 years";
+  }
+
+  /*
+   * Final fallback: keep a useful value rather than a vague label.
+   */
+  return "2-5 years";
+}
+
+
 function containsEducationQualification(
   line: string
 ): boolean {
@@ -843,6 +1100,15 @@ function normalizeLocation(location: string): string {
     return `Remote (${Array.from(new Set(regions)).join(", ")})`;
   }
 
+  if (
+    isRemote &&
+    /worldwide|global|every time zone|all time zones/i.test(
+      value
+    )
+  ) {
+    return "Remote (Worldwide)";
+  }
+
   if (isRemote) {
     return "Remote";
   }
@@ -922,8 +1188,14 @@ function determineGreenhouseCategory(
   }
 
   if (
-    /\bfreshers?\b|\bentry[- ]level\b|\brecent graduates?\b|\b0\s*(?:-|–|to)\s*[12]\s*years?\b/i.test(
+    /\bfreshers?\b|\bentry[- ]level\b|\brecent graduates?\b|\bnew graduates?\b|\bearly careers?\b|\bgraduate programme\b|\bgraduate program\b|\bjunior career path\b|\b0\s*(?:-|–|to)\s*[12]\s*years?\b/i.test(
       combined
+    ) ||
+    /\bgraduate\b|\bjunior\b|\bentry[- ]level\b|\bassociate\b|\bearly career\b/i.test(
+      role
+    ) ||
+    /^(Freshers|0-2 years)$/i.test(
+      experience
     )
   ) {
     return "freshers";
@@ -947,6 +1219,7 @@ function extractJobDescription(text: string): string {
     "what you'll do",
     "what you’ll do",
     "what your day will look like",
+    "what you will focus on",
     "what you deliver",
     "what you will deliver",
     "key deliverables",
@@ -962,6 +1235,7 @@ function extractJobDescription(text: string): string {
     "eligibility criteria",
     "benefits",
     "what we offer",
+    "what we offer you",
     "what we offer colleagues",
     "our offer",
   ].map(normalizeHeading);
@@ -1072,6 +1346,7 @@ function normalizeGreenhouseJob(
     "what we're looking for",
     "what we’re looking for",
     "what we are looking for in you",
+    "what we are looking for",
     "technical and professional requirements",
     "eligibility criteria",
     "educational qualification",
@@ -1114,9 +1389,17 @@ function normalizeGreenhouseJob(
   const cleanedSelectionProcess =
     cleanExtractedSection(selectionProcess);
 
-  const experience = extractExperience(
-    completeDescription
-  );
+  const extractedExperience =
+    extractExperience(
+      completeDescription
+    );
+
+  const experience =
+    inferGreenhouseExperience(
+      role,
+      completeDescription,
+      extractedExperience
+    );
 
   const sourceCreatedAt =
     parseDate(job.first_published)?.toISOString() ||

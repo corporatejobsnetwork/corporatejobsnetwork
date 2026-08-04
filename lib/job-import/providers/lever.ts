@@ -62,17 +62,21 @@ const INDIA_LOCATION_PATTERN =
   /\b(india|bengaluru|bangalore|hyderabad|pune|chennai|mumbai|delhi|noida|gurugram|gurgaon|kolkata|ahmedabad|kochi|cochin|trivandrum|thiruvananthapuram|jaipur|chandigarh|indore|bhubaneswar|mysuru|mysore|mangaluru|mangalore|hubballi|hubli)\b/i;
 
 const EXPERIENCE_PATTERNS = [
-  /\b(\d+\s*(?:-|–|—|to)\s*\d+\+?\s*years?(?:\s+of\s+experience)?)\b/i,
-  /\b(\d+\+\s*years?(?:\s+of\s+experience)?)\b/i,
-  /\b(?:minimum\s+(?:of\s+)?)?(\d+\s+years?(?:\s+of\s+experience)?)\b/i,
+  /\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*\+?\s*years?(?:\s+of\s+experience)?\b/i,
+  /\b(?:minimum\s+(?:of\s+)?|at\s+least\s+)?(\d+)\s*\+\s*years?(?:\s+of\s+experience)?\b/i,
+  /\b(?:minimum\s+(?:of\s+)?|at\s+least\s+)(\d+)\s*years?(?:\s+of\s+experience)?\b/i,
+  /\b(\d+)\s*years?\s+of\s+experience\b/i,
   /\b(freshers?)\b/i,
   /\b(entry[- ]level)\b/i,
+  /\b(no experience required)\b/i,
 ];
 
 const EDUCATION_PATTERNS = [
-  /\b(?:bachelor'?s?|master'?s?)\s+(?:degree\s+)?(?:in\s+)?[^.\n;]{2,100}/i,
-  /\b(?:B\.?\s*Tech|M\.?\s*Tech|B\.?\s*E\.?|M\.?\s*E\.?|BCA|MCA|BBA|MBA|B\.?\s*Com|M\.?\s*Com)\b[^.\n;]{0,100}/i,
-  /\b(?:graduate|graduation|undergraduate|postgraduate|diploma)\b[^.\n;]{0,100}/i,
+  /\b(?:bachelor'?s?|master'?s?)\s+(?:degree\s+)?(?:in\s+)?[^.\n;]{2,120}/i,
+  /\b(?:B\.?\s*Tech|M\.?\s*Tech|BCA|MCA|BBA|MBA|B\.?\s*Com|M\.?\s*Com)\b[^.\n;]{0,120}/i,
+  /\b(?:B\.?\s*E\.?|M\.?\s*E\.?)\b[^.\n;]{0,120}/,
+  /\b(?:graduate|graduation|undergraduate|postgraduate|post graduation|diploma)\b[^.\n;]{0,120}/i,
+  /\b(?:degree|qualification)\s+(?:in|from)\s+[^.\n;]{2,120}/i,
 ];
 
 const SALARY_PATTERNS = [
@@ -212,24 +216,287 @@ function buildDescription(job: LeverJob): string {
   ).join("\n");
 }
 
-function extractExperience(text: string): string {
-  for (const pattern of EXPERIENCE_PATTERNS) {
-    const match = text.match(pattern);
+function normalizeExperienceValue(
+  value: string
+): string {
+  const normalized = value
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
 
-    if (match?.[1]) {
-      return match[1].replace(/\s+/g, " ").trim();
-    }
+  if (!normalized) {
+    return "Not Mentioned";
+  }
+
+  if (/^freshers?$/i.test(normalized)) {
+    return "Freshers";
+  }
+
+  if (
+    /^(entry[- ]level|no experience required)$/i.test(
+      normalized
+    )
+  ) {
+    return "0-2 years";
+  }
+
+  const rangeMatch = normalized.match(
+    /\b(\d+)\s*(?:-|to)\s*(\d+)\s*years?\b/i
+  );
+
+  if (rangeMatch) {
+    return `${rangeMatch[1]}-${rangeMatch[2]} years`;
+  }
+
+  const plusMatch = normalized.match(
+    /\b(\d+)\s*\+\s*years?\b/i
+  );
+
+  if (plusMatch) {
+    return `${plusMatch[1]}+ years`;
+  }
+
+  const singleMatch = normalized.match(
+    /\b(\d+)\s*years?\b/i
+  );
+
+  if (singleMatch) {
+    const years = Number(singleMatch[1]);
+
+    return years >= 5
+      ? `${years}+ years`
+      : `${years} years`;
+  }
+
+  return normalized;
+}
+
+function inferExperienceFromRole(
+  role: string
+): string {
+  const value = role.toLowerCase();
+
+  if (
+    /\b(intern|internship|apprentice|trainee)\b/.test(
+      value
+    )
+  ) {
+    return "Internship";
+  }
+
+  if (
+    /\b(graduate|junior|entry[- ]level|associate)\b/.test(
+      value
+    )
+  ) {
+    return "0-2 years";
+  }
+
+  if (
+    /\b(chief|principal|director|head|vice president|vp)\b/.test(
+      value
+    )
+  ) {
+    return "10+ years";
+  }
+
+  if (
+    /\b(team leader|team lead|lead|manager|architect|staff)\b/.test(
+      value
+    )
+  ) {
+    return "7+ years";
+  }
+
+  if (
+    /\b(senior|specialist|consultant|account executive|sales executive)\b/.test(
+      value
+    )
+  ) {
+    return "5+ years";
+  }
+
+  if (
+    /\b(engineer|developer|administrator|analyst|designer|executive|officer|coordinator)\b/.test(
+      value
+    )
+  ) {
+    return "3-5 years";
   }
 
   return "Not Mentioned";
 }
 
+function extractExperience(
+  text: string,
+  role = ""
+): string {
+  const normalizedText = text
+    .replace(/[–—]/g, "-")
+    .replace(
+      /\b(\d)\s*(\d)\s*years?\b/g,
+      "$1-$2 years"
+    );
+
+  const rangeMatch = normalizedText.match(
+    /\b(\d+)\s*(?:-|to)\s*(\d+)\s*\+?\s*years?(?:\s+of\s+experience)?\b/i
+  );
+
+  if (rangeMatch) {
+    return `${rangeMatch[1]}-${rangeMatch[2]} years`;
+  }
+
+  for (const pattern of EXPERIENCE_PATTERNS) {
+    const match = normalizedText.match(pattern);
+
+    if (!match) {
+      continue;
+    }
+
+    if (match[2]) {
+      return normalizeExperienceValue(
+        `${match[1]}-${match[2]} years`
+      );
+    }
+
+    if (match[1]) {
+      const capturedValue = match[1];
+
+      if (/^\d+$/.test(capturedValue)) {
+        const fullMatch = match[0];
+
+        if (/\+\s*years?/i.test(fullMatch)) {
+          return `${capturedValue}+ years`;
+        }
+
+        return `${capturedValue} years`;
+      }
+
+      return normalizeExperienceValue(
+        capturedValue
+      );
+    }
+  }
+
+  const experienceSignals = [
+    /\bproven experience\b/i,
+    /\brelevant experience\b/i,
+    /\bprevious experience\b/i,
+    /\bdemonstrated experience\b/i,
+    /\bexperience in\b/i,
+    /\bexperience with\b/i,
+    /\btrack record\b/i,
+  ];
+
+  const signalCount =
+    experienceSignals.filter((pattern) =>
+      pattern.test(normalizedText)
+    ).length;
+
+  if (signalCount >= 2) {
+    return "3-5 years";
+  }
+
+  const roleFallback =
+    inferExperienceFromRole(role);
+
+  if (roleFallback !== "Not Mentioned") {
+    return roleFallback;
+  }
+
+  if (signalCount === 1) {
+    return "2-5 years";
+  }
+
+  return "Not Mentioned";
+}
+
+function cleanEducationCandidate(
+  value: string
+): string {
+  return value
+    .replace(/^[-•*]\s*/, "")
+    .replace(/\s+/g, " ")
+    .replace(
+      /^(education|qualification|qualifications)\s*:\s*/i,
+      ""
+    )
+    .trim();
+}
+
+function isValidEducationCandidate(
+  value: string
+): boolean {
+  const normalized = value.toLowerCase();
+
+  if (value.length < 4 || value.length > 180) {
+    return false;
+  }
+
+  if (
+    /should be able|must be able|ability to|communication of plans|targets to the team|be the voice|be a part of the story|become an expert|build a strong pipeline/i.test(
+      value
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    /\b(bachelor|master|degree|graduate|graduation|undergraduate|postgraduate|post graduation|diploma|b\.?\s*tech|m\.?\s*tech|bca|mca|bba|mba|b\.?\s*com|m\.?\s*com)\b/i.test(
+      normalized
+    ) ||
+    /\b(?:B\.?\s*E\.?|M\.?\s*E\.?)\b/.test(
+      value
+    )
+  );
+}
+
 function extractEducation(text: string): string {
+  const lines = text
+    .split("\n")
+    .map(cleanEducationCandidate)
+    .filter(Boolean);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (
+      /^(education|qualification|qualifications)\s*:?\s*$/i.test(
+        line
+      )
+    ) {
+      const nextLine = lines[index + 1] || "";
+
+      if (isValidEducationCandidate(nextLine)) {
+        return nextLine;
+      }
+    }
+
+    if (isValidEducationCandidate(line)) {
+      for (const pattern of EDUCATION_PATTERNS) {
+        const match = line.match(pattern);
+
+        if (match?.[0]) {
+          return cleanEducationCandidate(
+            match[0]
+          );
+        }
+      }
+
+      return line;
+    }
+  }
+
   for (const pattern of EDUCATION_PATTERNS) {
     const match = text.match(pattern);
 
-    if (match?.[0]) {
-      return match[0].replace(/\s+/g, " ").trim();
+    if (
+      match?.[0] &&
+      isValidEducationCandidate(match[0])
+    ) {
+      return cleanEducationCandidate(
+        match[0]
+      );
     }
   }
 
@@ -433,7 +700,10 @@ export async function fetchLeverJobs(
       benefits,
       selectionProcess,
 
-      experience: extractExperience(description),
+      experience: extractExperience(
+        description,
+        job.text || ""
+      ),
       education: extractEducation(description),
       salary: extractSalary(job, description),
 

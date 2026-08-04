@@ -46,6 +46,7 @@ type Job = {
     directApply: boolean;
     referral: boolean;
   };
+  workMode: string;
   createdAt?: Timestamp | null;
 };
 
@@ -105,57 +106,167 @@ function categoryToFilter(category: string): ExperienceFilter {
   return "all";
 }
 
-function matchesCategoryValue(jobCategory: string, requestedCategory: string) {
-  if (!requestedCategory) return true;
+function parseExperienceNumbers(
+  experience: string
+): {
+  minimum: number | null;
+  maximum: number | null;
+} {
+  const value = experience
+    .trim()
+    .toLowerCase()
+    .replace(/[–—]/g, "-");
 
-  const jobValue = normalize(jobCategory);
-  const requestedValue = normalize(requestedCategory);
+  const rangeMatch = value.match(
+    /\b(\d+)\s*(?:-|to)\s*(\d+)\s*years?\b/
+  );
 
-  const aliases: Record<string, string[]> = {
-    fresher: ["fresher", "freshers"],
-    freshers: [
+  if (rangeMatch) {
+    return {
+      minimum: Number(rangeMatch[1]),
+      maximum: Number(rangeMatch[2]),
+    };
+  }
+
+  const plusMatch = value.match(
+    /\b(\d+)\s*\+\s*years?\b/
+  );
+
+  if (plusMatch) {
+    return {
+      minimum: Number(plusMatch[1]),
+      maximum: null,
+    };
+  }
+
+  const singleMatch = value.match(
+    /\b(\d+)\s*years?\b/
+  );
+
+  if (singleMatch) {
+    const years = Number(singleMatch[1]);
+
+    return {
+      minimum: years,
+      maximum: years,
+    };
+  }
+
+  return {
+    minimum: null,
+    maximum: null,
+  };
+}
+
+function isRemoteJob(job: Job): boolean {
+  const category = normalize(job.category);
+  const workMode = normalize(job.workMode);
+  const location = job.location.toLowerCase();
+  const role = job.role.toLowerCase();
+
+  return (
+    ["work-from-home", "wfh", "remote"].includes(
+      category
+    ) ||
+    [
+      "work-from-home",
+      "wfh",
+      "remote",
+      "fully-remote",
+      "home-based",
+    ].includes(workMode) ||
+    location.includes("remote") ||
+    location.includes("work from home") ||
+    location.includes("home based") ||
+    role.includes("work from home") ||
+    role.includes("remote")
+  );
+}
+
+function isFresherJob(job: Job): boolean {
+  const category = normalize(job.category);
+  const experience = job.experience
+    .trim()
+    .toLowerCase();
+
+  if (
+    [
       "fresher",
       "freshers",
       "freshers-experienced",
       "fresher-experienced",
       "both",
-    ],
-    experienced: [
+    ].includes(category)
+  ) {
+    return true;
+  }
+
+  if (
+    experience.includes("fresh") ||
+    experience.includes("entry level") ||
+    experience.includes("entry-level") ||
+    experience.includes("graduate")
+  ) {
+    return true;
+  }
+
+  const { minimum, maximum } =
+    parseExperienceNumbers(job.experience);
+
+  return (
+    minimum === 0 ||
+    (minimum !== null &&
+      maximum !== null &&
+      maximum <= 2)
+  );
+}
+
+function isExperiencedJob(
+  job: Job
+): boolean {
+  const category = normalize(job.category);
+  const experience = job.experience
+    .trim()
+    .toLowerCase();
+
+  if (
+    [
       "experienced",
       "experience",
       "freshers-experienced",
       "fresher-experienced",
       "both",
-    ],
-    experience: ["experienced", "experience"],
-    internship: ["intern", "internship", "internships"],
-    internships: ["intern", "internship", "internships"],
-    intern: ["intern", "internship", "internships"],
-    "work-from-home": ["work-from-home", "wfh", "remote"],
-    wfh: ["work-from-home", "wfh", "remote"],
-    remote: ["work-from-home", "wfh", "remote"],
-    "walk-in": [
-      "walk-in",
-      "walkin",
-      "walk-in-drive",
-      "walk-in-drives",
-      "walkin-drive",
-      "walkin-drives",
-    ],
-    walkin: [
-      "walk-in",
-      "walkin",
-      "walk-in-drive",
-      "walk-in-drives",
-      "walkin-drive",
-      "walkin-drives",
-    ],
-  };
+    ].includes(category)
+  ) {
+    return true;
+  }
 
-  const acceptedValues = aliases[requestedValue] ?? [requestedValue];
-  return acceptedValues.includes(jobValue);
+  if (
+    experience.includes("experienced") ||
+    experience.includes(
+      "relevant experience"
+    )
+  ) {
+    return true;
+  }
+
+  const { minimum, maximum } =
+    parseExperienceNumbers(job.experience);
+
+  // 0-2 year roles must appear in both lists.
+  if (
+    minimum === 0 &&
+    maximum !== null &&
+    maximum >= 2
+  ) {
+    return true;
+  }
+
+  return (
+    (minimum !== null && minimum >= 1) ||
+    (maximum !== null && maximum >= 2)
+  );
 }
-
 
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -267,6 +378,7 @@ function LatestJobsContent() {
                   ? data.applicationMode.referral
                   : false,
             },
+            workMode: String(data.workMode ?? ""),
             createdAt: data.createdAt ?? null,
           };
         });
@@ -322,80 +434,87 @@ function LatestJobsContent() {
       const matchesSearch =
         keyword === "" || searchableText.includes(keyword);
 
-      const experienceText = job.experience.toLowerCase();
-      const roleText = job.role.toLowerCase();
-      const locationText = job.location.toLowerCase();
-      const categoryText = normalize(job.category);
+      const experienceText =
+        job.experience.toLowerCase();
+      const roleText =
+        job.role.toLowerCase();
+      const categoryText =
+        normalize(job.category);
 
-      const fresherCategories = [
-        "fresher",
-        "freshers",
-        "freshers-experienced",
-        "fresher-experienced",
-        "both",
-      ];
+      const isRemote =
+        isRemoteJob(job);
 
-      const experiencedCategories = [
-        "experienced",
-        "experience",
-        "freshers-experienced",
-        "fresher-experienced",
-        "both",
-      ];
+      const isIntern =
+        [
+          "intern",
+          "internship",
+          "internships",
+        ].includes(categoryText) ||
+        roleText.includes("intern") ||
+        experienceText.includes("intern");
+
+      const isWalkIn =
+        [
+          "walk-in",
+          "walkin",
+          "walk-in-drive",
+          "walk-in-drives",
+          "walkin-drive",
+          "walkin-drives",
+        ].includes(categoryText) ||
+        roleText.includes("walk-in") ||
+        roleText.includes("walk in");
+
+      const isFresher =
+        isFresherJob(job);
+
+      const isExperienced =
+        isExperiencedJob(job);
 
       let matchesFilter = true;
 
-      if (experienceFilter === "freshers") {
-        matchesFilter = fresherCategories.includes(categoryText);
-      }
-
-      if (experienceFilter === "experienced") {
-        matchesFilter = experiencedCategories.includes(categoryText);
-      }
-
-      if (experienceFilter === "work-from-home") {
+      if (
+        experienceFilter === "freshers"
+      ) {
         matchesFilter =
-          ["work-from-home", "wfh", "remote"].includes(categoryText) ||
-          locationText.includes("work from home") ||
-          locationText.includes("remote") ||
-          roleText.includes("work from home") ||
-          experienceText.includes("work from home");
+          isFresher && !isIntern;
       }
 
-      if (experienceFilter === "internship") {
+      if (
+        experienceFilter ===
+        "experienced"
+      ) {
         matchesFilter =
-          ["intern", "internship", "internships"].includes(categoryText) ||
-          roleText.includes("intern") ||
-          experienceText.includes("intern");
+          isExperienced && !isIntern;
       }
 
-      if (experienceFilter === "walk-in") {
-        matchesFilter =
-          [
-            "walk-in",
-            "walkin",
-            "walk-in-drive",
-            "walk-in-drives",
-            "walkin-drive",
-            "walkin-drives",
-          ].includes(categoryText) ||
-          roleText.includes("walk-in") ||
-          roleText.includes("walk in");
+      if (
+        experienceFilter ===
+        "work-from-home"
+      ) {
+        matchesFilter = isRemote;
+      }
+
+      if (
+        experienceFilter ===
+        "internship"
+      ) {
+        matchesFilter = isIntern;
+      }
+
+      if (
+        experienceFilter === "walk-in"
+      ) {
+        matchesFilter = isWalkIn;
       }
 
       const matchesType =
         !urlType || normalize(job.type) === normalize(urlType);
 
-      const matchesCategory = matchesCategoryValue(
-        job.category,
-        urlCategory
-      );
-
       return (
         matchesSearch &&
         matchesFilter &&
-        matchesType &&
-        matchesCategory
+        matchesType
       );
     });
   }, [
